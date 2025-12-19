@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的媒体库</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header>
+        <h1>我的媒体库</h1>
+        <p>将文件放入 <code>media</code> 文件夹后，刷新此页面即可看到内容。</p>
+        <p>支持格式：PDF、WAV、MP3、OGG、M4A、AAC</p>
+        <button id="refresh-btn" onclick="loadFiles()">刷新文件列表</button>
+    </header>
+
+    <main>
+        <section id="pdf-section">
+            <h2>PDF 文档</h2>
+            <div id="pdf-list" class="grid-container">
+                <!-- PDF文件将在这里显示 -->
+            </div>
+        </section>
+
+        <section id="audio-section">
+            <h2>音频文件</h2>
+            <div id="audio-list" class="list-container">
+                <!-- 音频文件将在这里显示 -->
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // 当页面加载完成后执行
+        window.onload = function() {
+            loadFiles();
+        };
+
+        // 加载文件列表函数
+        function loadFiles() {
+            // 显示加载指示器
+            document.getElementById('pdf-list').innerHTML = '<p class="loading">正在加载文件列表...</p>';
+            document.getElementById('audio-list').innerHTML = '<p class="loading">正在加载文件列表...</p>';
+            
+            // 从我们的后端 API 获取文件列表，添加时间戳防止缓存
+            fetch('/api/files?' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    const pdfList = document.getElementById('pdf-list');
+                    const audioList = document.getElementById('audio-list');
+                    
+                    // 清空现有内容
+                    pdfList.innerHTML = '';
+                    audioList.innerHTML = '';
+
+                    // --- 处理 PDF 文件 ---
+                    if (data.pdfs.length === 0) {
+                        pdfList.innerHTML = '<p class="no-files">暂无 PDF 文件。<br>请将PDF文件拖入media文件夹后刷新。</p>';
+                    } else {
+                        data.pdfs.forEach(filename => {
+                            const pdfItem = document.createElement('div');
+                            pdfItem.className = 'grid-item';
+                            
+                            // 对文件名进行编码，确保中文文件名能正确处理
+                            const encodedFilename = encodeURIComponent(filename);
+                            
+                            pdfItem.innerHTML = `
+                                <div class="file-header">
+                                    <h3 title="${filename}">${filename}</h3>
+                                    <button onclick="openPdfFullscreen('/media/${encodedFilename}')" class="fullscreen-btn">全屏查看</button>
+                                </div>
+                                <div class="pdf-container">
+                                    <object data="/media/${encodedFilename}" type="application/pdf" width="100%" height="400px">
+                                        <div class="pdf-fallback">
+                                            <p>无法显示PDF预览</p>
+                                            <a href="/media/${encodedFilename}" target="_blank" class="download-link">点击下载或在新窗口打开</a>
+                                        </div>
+                                    </object>
+                                </div>
+                            `;
+                            pdfList.appendChild(pdfItem);
+                        });
+                    }
+
+                    // --- 处理音频文件 ---
+                    if (data.audios.length === 0) {
+                        audioList.innerHTML = '<p class="no-files">暂无音频文件。<br>请将音频文件拖入media文件夹后刷新。</p>';
+                    } else {
+                        data.audios.forEach(filename => {
+                            const audioItem = document.createElement('div');
+                            audioItem.className = 'list-item';
+                            const fileExt = filename.split('.').pop().toUpperCase();
+                            
+                            // 对文件名进行编码，确保中文文件名能正确处理
+                            const encodedFilename = encodeURIComponent(filename);
+                            
+                            audioItem.innerHTML = `
+                                <div class="audio-info">
+                                    <span class="filename" title="${filename}">${filename}</span>
+                                    <span class="file-type">${fileExt}</span>
+                                </div>
+                                <div class="audio-player">
+                                    <audio id="audio-${encodedFilename}" preload="metadata" src="/media/${encodedFilename}">
+                                        您的浏览器不支持音频播放。
+                                        <a href="/media/${encodedFilename}">下载音频文件</a>
+                                    </audio>
+                                    <div class="custom-audio-controls">
+                                        <button class="play-pause-btn" onclick="togglePlay('audio-${encodedFilename}')">播放</button>
+                                        <div class="progress-container">
+                                            <div class="progress-bar" id="progress-${encodedFilename}"></div>
+                                        </div>
+                                        <span class="time-display" id="time-${encodedFilename}">00:00 / 00:00</span>
+                                    </div>
+                                </div>
+                            `;
+                            audioList.appendChild(audioItem);
+                            
+                            // 设置音频事件监听
+                            setTimeout(() => {
+                                setupAudioEvents(encodedFilename);
+                            }, 100);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('获取文件列表失败:', error);
+                    document.querySelector('main').innerHTML = '<h2 class="error-message">加载内容失败，请检查服务器是否正常运行。</h2>';
+                });
+        }
+
+        // 全屏查看PDF函数
+        function openPdfFullscreen(pdfUrl) {
+            window.open(pdfUrl, '_blank', 'fullscreen=yes,scrollbars=yes,resizable=yes');
+        }
+        
+        // 设置音频播放器事件
+        function setupAudioEvents(encodedFilename) {
+            const audio = document.getElementById('audio-' + encodedFilename);
+            const progressBar = document.getElementById('progress-' + encodedFilename);
+            const timeDisplay = document.getElementById('time-' + encodedFilename);
+            
+            if (!audio || !progressBar || !timeDisplay) return;
+            
+            // 更新进度条和时间显示
+            audio.addEventListener('timeupdate', () => {
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progressBar.style.width = percent + '%';
+                
+                // 格式化时间显示
+                const currentMinutes = Math.floor(audio.currentTime / 60);
+                const currentSeconds = Math.floor(audio.currentTime % 60);
+                const durationMinutes = Math.floor(audio.duration / 60) || 0;
+                const durationSeconds = Math.floor(audio.duration % 60) || 0;
+                
+                timeDisplay.textContent = `${currentMinutes.toString().padStart(2, '0')}:${currentSeconds.toString().padStart(2, '0')} / ${durationMinutes.toString().padStart(2, '0')}:${durationSeconds.toString().padStart(2, '0')}`;
+            });
+            
+            // 音频结束时重置按钮
+            audio.addEventListener('ended', () => {
+                const playPauseBtn = audio.parentElement.querySelector('.play-pause-btn');
+                if (playPauseBtn) {
+                    playPauseBtn.textContent = '播放';
+                    playPauseBtn.classList.remove('playing');
+                }
+            });
+            
+            // 点击进度条跳转
+            const progressContainer = progressBar.parentElement;
+            progressContainer.addEventListener('click', (e) => {
+                const rect = progressContainer.getBoundingClientRect();
+                const pos = (e.clientX - rect.left) / rect.width;
+                audio.currentTime = pos * audio.duration;
+            });
+        }
+        
+        // 播放/暂停切换
+        function togglePlay(audioId) {
+            const audio = document.getElementById(audioId);
+            const btn = audio.parentElement.querySelector('.play-pause-btn');
+            
+            if (audio.paused) {
+                // 暂停所有其他音频
+                document.querySelectorAll('audio').forEach(a => {
+                    if (a.id !== audioId && !a.paused) {
+                        a.pause();
+                        const otherBtn = a.parentElement.querySelector('.play-pause-btn');
+                        if (otherBtn) {
+                            otherBtn.textContent = '播放';
+                            otherBtn.classList.remove('playing');
+                        }
+                    }
+                });
+                
+                // 播放当前音频
+                audio.play();
+                btn.textContent = '暂停';
+                btn.classList.add('playing');
+            } else {
+                audio.pause();
+                btn.textContent = '播放';
+                btn.classList.remove('playing');
+            }
+        }
+    </script>
+
+</body>
+</html>
